@@ -10,6 +10,13 @@
 #include <console_macros.S>
 #include <drivers/ti/uart/uart_16550.h>
 
+/* Bounds for the CNTPCT-based FIFO waits below.  The LSR can stay zero
+ * forever when the UART clock is gated, so every wait needs a deadline:
+ * one character at any sane baud rate fits well inside 30 ms, and a full
+ * FIFO inside 150 ms. */
+#define CONSOLE_16550_PUTC_TIMEOUT_MS	30
+#define CONSOLE_16550_FLUSH_TIMEOUT_MS	150
+
 	/*
 	 * "core" functions are low-level implementations that don't require
 	 * writable memory and are thus safe to call in BL1 crash context.
@@ -140,6 +147,25 @@ func console_16550_core_putc
 	ASM_ASSERT(ne)
 #endif /* ENABLE_ASSERTIONS */
 
+	/*
+	 * Bound the FIFO wait with CNTPCT.  When the UART clock is gated
+	 * (a common OS power-saving measure) LSR can stay at zero for an
+	 * unbounded time and the polling loop would never return; drop the
+	 * character instead.  x4 holds the deadline, or ~0 when the
+	 * platform's counter is not running yet.
+	 */
+	mrs	x4, cntfrq_el0
+	cbz	x4, 7f
+	mov	w5, #1000
+	udiv	w4, w4, w5		/* ticks per ms */
+	mov	w5, #CONSOLE_16550_PUTC_TIMEOUT_MS
+	mul	x4, x5, x4
+	mrs	x5, cntpct_el0
+	add	x4, x4, x5
+	b	8f
+7:	mov	x4, #-1
+8:
+
 	/* Prepend '\r' to '\n' */
 	cmp	w0, #0xA
 	b.ne	2f
@@ -147,16 +173,26 @@ func console_16550_core_putc
 1:	ldr	w2, [x1, #UARTLSR]
 	and	w2, w2, #(UARTLSR_TEMT | UARTLSR_THRE)
 	cmp	w2, #(UARTLSR_TEMT | UARTLSR_THRE)
-	b.ne	1b
-	mov	w2, #0xD		/* '\r' */
+	b.eq	1f
+	mrs	x5, cntpct_el0
+	cmp	x5, x4
+	b.lo	1b
+	mov	w0, #-1
+	ret
+1:	mov	w2, #0xD		/* '\r' */
 	str	w2, [x1, #UARTTX]
 
 	/* Check if the transmit FIFO is full */
 2:	ldr	w2, [x1, #UARTLSR]
 	and	w2, w2, #(UARTLSR_TEMT | UARTLSR_THRE)
 	cmp	w2, #(UARTLSR_TEMT | UARTLSR_THRE)
-	b.ne	2b
-	str	w0, [x1, #UARTTX]
+	b.eq	2f
+	mrs	x5, cntpct_el0
+	cmp	x5, x4
+	b.lo	2b
+	mov	w0, #-1
+	ret
+2:	str	w0, [x1, #UARTTX]
 	ret
 endfunc console_16550_core_putc
 
@@ -239,12 +275,30 @@ func console_16550_core_flush
 	ASM_ASSERT(ne)
 #endif /* ENABLE_ASSERTIONS */
 
-	/* Loop until the transmit FIFO is empty */
+	/*
+	 * Loop until the transmit FIFO is empty, bounded by CNTPCT for the
+	 * same reason as core_putc (150 ms covers a full FIFO at any sane
+	 * baud rate).
+	 */
+	mrs	x2, cntfrq_el0
+	cbz	x2, 7f
+	mov	w3, #1000
+	udiv	w2, w2, w3		/* ticks per ms */
+	mov	w3, #CONSOLE_16550_FLUSH_TIMEOUT_MS
+	mul	x2, x3, x2
+	mrs	x3, cntpct_el0
+	add	x2, x2, x3
+	b	8f
+7:	mov	x2, #-1
+8:
 1:	ldr	w1, [x0, #UARTLSR]
 	and	w1, w1, #(UARTLSR_TEMT | UARTLSR_THRE)
 	cmp	w1, #(UARTLSR_TEMT | UARTLSR_THRE)
-	b.ne	1b
-
+	b.eq	2f
+	mrs	x3, cntpct_el0
+	cmp	x3, x2
+	b.lo	1b
+2:
 	ret
 endfunc console_16550_core_flush
 

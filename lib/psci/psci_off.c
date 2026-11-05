@@ -47,6 +47,7 @@ static void psci_set_power_off_state(psci_power_state_t *state_info)
 int psci_do_cpu_off(unsigned int end_pwrlvl)
 {
 	int rc = PSCI_E_SUCCESS;
+	bool locks_released = false;
 	unsigned int idx = plat_my_core_pos();
 	psci_power_state_t state_info;
 	unsigned int parent_nodes[PLAT_MAX_PWR_LVL] = {0};
@@ -111,6 +112,25 @@ int psci_do_cpu_off(unsigned int end_pwrlvl)
 	/* Update the target state in the power domain nodes */
 	psci_set_target_local_pwr_states(idx, end_pwrlvl, &state_info);
 
+	/*
+	 * The A733 PPU can remove this core's power as soon as the platform
+	 * off handler raises the CPUIDLE assist, before the generic tail
+	 * below commits AFF_STATE_OFF and releases the power-domain locks.
+	 * A core that disappears there keeps the locks forever and leaves
+	 * its affinity state ON, so every later CPU_OFF spins and every
+	 * CPU_ON returns ALREADY_ON.  Commit the negotiated state and drop
+	 * the locks before handing control to the platform.
+	 */
+	psci_set_aff_info_state(AFF_STATE_OFF);
+	flush_dcache_range(
+		(uintptr_t)&get_cpu_data(psci_svc_cpu_data.aff_info_state),
+		sizeof(get_cpu_data(psci_svc_cpu_data.aff_info_state)));
+	dsbish();
+	psci_release_pwr_domain_locks(end_pwrlvl, parent_nodes);
+	flush_dcache_range((uintptr_t)psci_locks, sizeof(psci_locks));
+	dsbish();
+	locks_released = true;
+
 #if ENABLE_PSCI_STAT
 	/* Update the last cpu for each level till end_pwrlvl */
 	psci_stats_update_pwr_down(idx, end_pwrlvl, &state_info);
@@ -141,11 +161,13 @@ int psci_do_cpu_off(unsigned int end_pwrlvl)
 #endif
 
 off_exit:
-	/*
-	 * Release the locks corresponding to each power level in the
-	 * reverse order to which they were acquired.
-	 */
-	psci_release_pwr_domain_locks(end_pwrlvl, parent_nodes);
+	if (!locks_released) {
+		/*
+		 * Release the locks corresponding to each power level in
+		 * the reverse order to which they were acquired.
+		 */
+		psci_release_pwr_domain_locks(end_pwrlvl, parent_nodes);
+	}
 
 	/*
 	 * Check if all actions needed to safely power down this cpu have

@@ -300,6 +300,20 @@ static int32_t opteed_init(void)
 	 * absence is a critical failure.
 	 */
 	optee_entry_point = bl31_plat_get_next_image_ep_info(SECURE);
+
+#if defined(SUNXI_OPTEE_OPTIONAL) && SUNXI_OPTEE_OPTIONAL
+	/*
+	 * A boot package without a BL32 image is a valid configuration on
+	 * this platform: skip the SPD init and let BL33 run instead of
+	 * asserting.  The default (option unset) keeps the upstream
+	 * behaviour.
+	 */
+	if (optee_entry_point == NULL) {
+		NOTICE("BL31: no OP-TEE image; continuing to BL33\n");
+		return 1;
+	}
+#endif
+
 	return opteed_init_with_entry_point(optee_entry_point);
 }
 #endif  /* !OPTEE_ALLOW_SMC_LOAD */

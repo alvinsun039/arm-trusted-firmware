@@ -173,6 +173,15 @@ func bl31_warm_entrypoint
 		_exception_vectors=runtime_exceptions		\
 		_pie_fixup_size=0
 
+	/*
+	 * A core that was fully powered off comes back with TPIDR_EL3
+	 * reset, and every get_cpu_data() read after this point (PSCI
+	 * per-CPU state, warmboot entry info) would then use address 0.
+	 * Re-derive it with the generic per-CPU macro.
+	 */
+	per_cpu_init
+	isb
+
 	el3_enable_mmu
 
 	bl	bl31_warmboot

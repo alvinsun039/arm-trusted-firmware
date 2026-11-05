@@ -550,6 +550,11 @@ func cortex_a76_core_pwr_dwn
 	apply_erratum cortex_a76, ERRATUM(2743102), ERRATA_A76_2743102
 
 	isb
+	/*
+	 * see cortex_a55_core_pwr_dwn - acknowledge an abandoned
+	 * (in-line) powerdown for the PSCI framework.
+	 */
+	signal_pabandon_handled
 	ret
 endfunc cortex_a76_core_pwr_dwn
 

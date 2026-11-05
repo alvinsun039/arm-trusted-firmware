@@ -237,6 +237,17 @@ int plat_sdei_validate_entry_point(uintptr_t ep, unsigned int client_mode);
 void plat_sdei_handle_masked_trigger(uint64_t mpidr, unsigned int intr);
 #endif
 
+/*******************************************************************************
+ * Optional platform hook: intercept a call in the Arm Architecture Service
+ * range (OEN 0) before the generic handler answers it.  Some SoCs ship a
+ * vendor ABI in OEN 0; such a platform implements this hook and returns true
+ * when it has answered the call.  The default is a weak stub, so platforms
+ * that do not need it link and behave exactly like upstream.
+ ******************************************************************************/
+#pragma weak plat_arch_svc_override
+bool plat_arch_svc_override(uint32_t smc_fid, u_register_t x1,
+			    u_register_t x2, u_register_t x3, void *handle);
+
 void plat_default_ea_handler(unsigned int ea_reason, uint64_t syndrome, void *cookie,
 		void *handle, uint64_t flags);
 void plat_ea_handler(unsigned int ea_reason, uint64_t syndrome, void *cookie,

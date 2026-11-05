@@ -88,9 +88,13 @@ int psci_cpu_suspend(unsigned int power_state,
 	}
 
 	/*
-	 * Get the value of the state type bit from the power state parameter.
+	 * Classify by the VALIDATED state array rather than the raw request
+	 * bit: the platform's validate hook may downgrade a powerdown
+	 * request to retention, and the finish path must match what the
+	 * platform actually planned.
 	 */
-	is_power_down_state = psci_get_pstate_type(power_state);
+	is_power_down_state =
+		(psci_find_max_off_lvl(&state_info) != PSCI_INVALID_PWR_LVL);
 
 	/* Sanity check the requested suspend levels */
 	assert(psci_validate_suspend_req(&state_info, is_power_down_state)
@@ -265,6 +269,19 @@ aff_info_state_t psci_get_aff_by_idx(unsigned int cpu_idx)
 	 * so the cache may contain stale data for the target CPU.
 	 */
 	flush_cpu_data_by_index(cpu_idx, psci_svc_cpu_data);
+
+	/*
+	 * The target core writes AFF_STATE_OFF as it powers down, possibly
+	 * with its caches already off; with HW_ASSISTED_COHERENCY the
+	 * generic flush above is a no-op and this CPU can keep reading the
+	 * stale ON value.  Invalidate the line so the read comes from
+	 * memory.
+	 */
+	inv_dcache_range(
+		(uintptr_t)&get_cpu_data_by_index(cpu_idx,
+						  psci_svc_cpu_data.aff_info_state),
+		sizeof(get_cpu_data_by_index(cpu_idx,
+					     psci_svc_cpu_data.aff_info_state)));
 
 	return psci_get_aff_info_state_by_idx(cpu_idx);
 }

@@ -119,6 +119,7 @@ int psci_cpu_suspend_start(unsigned int idx,
 			   unsigned int is_power_down_state)
 {
 	int rc = PSCI_E_SUCCESS;
+	bool locks_released = false;
 	unsigned int parent_nodes[PLAT_MAX_PWR_LVL] = {0};
 	unsigned int max_off_lvl = 0;
 
@@ -193,6 +194,18 @@ int psci_cpu_suspend_start(unsigned int idx,
 	psci_stats_update_pwr_down(idx, end_pwrlvl, state_info);
 #endif
 
+	/*
+	 * A733: the ARISC may remove AP power as soon as pwr_domain_suspend()
+	 * hands over the CPU_OP, i.e. before the release below would run.
+	 * The lock words would then stay locked in memory and the resume
+	 * path would spin forever in psci_acquire_pwr_domain_locks().
+	 * Release and flush them before the platform hand-off.
+	 */
+	psci_release_pwr_domain_locks(end_pwrlvl, parent_nodes);
+	flush_dcache_range((uintptr_t)psci_locks, sizeof(psci_locks));
+	dsbish();
+	locks_released = true;
+
 	if (is_power_down_state != 0U) {
 		max_off_lvl = psci_find_max_off_lvl(state_info);
 		psci_suspend_to_pwrdown_start(idx, end_pwrlvl, max_off_lvl, state_info);
@@ -215,11 +228,13 @@ int psci_cpu_suspend_start(unsigned int idx,
 	plat_psci_stat_accounting_start(state_info);
 #endif
 
-	/*
-	 * Release the locks corresponding to each power level in the
-	 * reverse order to which they were acquired.
-	 */
-	psci_release_pwr_domain_locks(end_pwrlvl, parent_nodes);
+	if (!locks_released) {
+		/*
+		 * Release the locks corresponding to each power level in
+		 * the reverse order to which they were acquired.
+		 */
+		psci_release_pwr_domain_locks(end_pwrlvl, parent_nodes);
+	}
 
 #if ENABLE_RUNTIME_INSTRUMENTATION
 	/*

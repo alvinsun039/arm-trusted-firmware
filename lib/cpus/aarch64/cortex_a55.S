@@ -126,8 +126,16 @@ cpu_reset_func_end cortex_a55
 	 * ---------------------------------------------
 	 */
 func cortex_a55_core_pwr_dwn
+	stp	x29, x30, [sp, #-16]!
 	sysreg_bit_set CORTEX_A55_CPUPWRCTLR_EL1, CORTEX_A55_CORE_PWRDN_EN_MASK
 	isb
+	/*
+	 * the PSCI framework abandons the powerdown if the WFI
+	 * returns (the cpu-sleep idle states wake in-line on this SoC);
+	 * acknowledge the abandoned powerdown as the framework requires,
+	 * otherwise prepare_cpu_pwr_up() panics.
+	 */
+	signal_pabandon_handled
 	ret
 endfunc cortex_a55_core_pwr_dwn
 

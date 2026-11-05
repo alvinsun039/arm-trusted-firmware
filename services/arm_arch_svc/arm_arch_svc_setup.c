@@ -254,6 +254,12 @@ static uintptr_t smccc_arch_feature_availability(u_register_t reg,
 #endif /* ARCH_FEATURE_AVAILABILITY */
 
 /*
+ * The optional OEN-0 takeover hook (plat_arch_svc_override) is declared in
+ * plat/common/platform.h; a platform that implements it answers its own
+ * calls before the generic switch below.
+ */
+
+/*
  * Top-level Arm Architectural Service SMC handler.
  */
 static uintptr_t arm_arch_svc_smc_handler(uint32_t smc_fid,
@@ -269,6 +275,11 @@ static uintptr_t arm_arch_svc_smc_handler(uint32_t smc_fid,
 	(void)x3;
 	(void)x4;
 	(void)cookie;
+
+	if ((plat_arch_svc_override != NULL) &&
+	    plat_arch_svc_override(smc_fid, x1, x2, x3, handle)) {
+		return 0;
+	}
 
 	switch (smc_fid) {
 	case SMCCC_VERSION:
